@@ -2,23 +2,118 @@
 platform: x64
 image: Visual Studio 2017
 
+environment:
+  matrix:
+    - TARGET: vs2008
+      BUILD_ENVIRONMENT: msbuild
+      APPVEYOR_BUILD_WORKER_IMAGE: Visual Studio 2015
+      configuration: Release
+      platform: Win32
+
+    # - TARGET: vs2015
+    #   BUILD_ENVIRONMENT: msbuild
+    #   APPVEYOR_BUILD_WORKER_IMAGE: Visual Studio 2017
+    #   configuration: Release
+
+    # - TARGET: vs2017
+    #   BUILD_ENVIRONMENT: msbuild
+    #   APPVEYOR_BUILD_WORKER_IMAGE: Visual Studio 2017
+    #   configuration: Release
+
+    # - TARGET: cygwin-gcc
+    #   BUILD_ENVIRONMENT: cygwin
+    #   APPVEYOR_BUILD_WORKER_IMAGE: Visual Studio 2017
+
+    - TARGET: cygwin64-gcc
+      BUILD_ENVIRONMENT: cygwin
+      APPVEYOR_BUILD_WORKER_IMAGE: Visual Studio 2017
+
 ## Install Script ##
 install:
-  - set CYGWIN_ROOT=C:\cygwin64
-  - set PATH=%CYGWIN_ROOT%\bin;%PATH%
-  - bash --version
-  - bash -c 'autoreconf --version'
-  - bash -c 'make --version'
+  - ps: |
+      if ($env:BUILD_ENVIRONMENT -eq "msbuild") {
+        Invoke-WebRequest "https://github.com/chemeris/msinttypes/archive/f9e7c5758ed9e3b9f4b2394de1881c704dd79de0.zip" -OutFile "$($env:TEMP)\msinttypes.zip"
+        Expand-Archive -Path "$($env:TEMP)\msinttypes.zip"
+        Get-ChildItem
+        Get-ChildItem msinttypes
+        Get-ChildItem msinttypes\*
+        Move-Item -Path .\msinttypes\*\*.h -Destination .\src
+        Get-ChildItem .\src
+      }
 
 ## Disable MSBuild (default) ##
 build: off
 
 ## Build Script ##
 build_script:
-  - bash autogen.sh
-  - bash configure
-  - bash -c 'make'
+  # msbuild
+  - ps: |
+      if ($env:BUILD_ENVIRONMENT -eq "msbuild") {
+        Write-Host "build_script for msbuild"
+
+        # See https://www.appveyor.com/docs/lang/cpp/#visual-studio-2015
+        if ($env:TARGET -eq "vs2015") {
+          if ($env:PLATFORM -eq "x86") {
+            & "C:\Program Files (x86)\Microsoft Visual Studio 14.0\VC\vcvarsall.bat" x86
+          }
+          if ($env:PLATFORM -eq "x64") {
+            & "C:\Program Files\Microsoft SDKs\Windows\v7.1\Bin\SetEnv.cmd" /x64
+            & "C:\Program Files (x86)\Microsoft Visual Studio 14.0\VC\vcvarsall.bat" x86_amd64
+          }
+          $env:Path += ";C:\Program Files (x86)\Microsoft Visual Studio 14.0\Common7\IDE\devenv.exe"
+        }
+
+        # See https://www.appveyor.com/docs/lang/cpp/#visual-studio-2017
+        if ($env:TARGET -eq "vs2017") {
+          if ($env:PLATFORM -eq "x86") {
+            & "C:\Program Files (x86)\Microsoft Visual Studio\2017\Community\VC\Auxiliary\Build\vcvars32.bat"
+          }
+          if ($env:PLATFORM -eq "x64") {
+            & "C:\Program Files (x86)\Microsoft Visual Studio\2017\Community\VC\Auxiliary\Build\vcvars64.bat"
+          }
+          $env:Path += ";C:\Program Files (x86)\Microsoft Visual Studio\2017\Professional\Common7\IDE\devenv.exe"
+          $env:Path += ";C:\Program Files (x86)\Microsoft Visual Studio\2017\Community\Common7\IDE\devenv.exe"
+        }
+
+        Set-Location "src/win32"
+
+        if ($env:TARGET -eq "vs2015" -Or $env:TARGET -eq "vs2017") {
+          # https://docs.microsoft.com/en-us/visualstudio/ide/reference/upgrade-devenv-exe?view=vs-2017
+          Get-ChildItem
+          devenv.exe modbus-9.sln /Upgrade
+          Get-ChildItem
+        }
+
+        MSBuild /nologo /p:Configuration=$env:CONFIGURATION /logger:"C:\Program Files\AppVeyor\BuildAgent\Appveyor.MSBuildLogger.dll" modbus-9.sln
+      }
+
+  # cygwin
+  - ps: |
+      if ($env:BUILD_ENVIRONMENT -eq "cygwin") {
+        Write-Host "build_script for cygwin"
+
+        if ($env:TARGET -eq "cygwin-gcc") {
+          $env:CYGWIN_ROOT = "C:\cygwin"
+        }
+        if ($env:TARGET -eq "cygwin64-gcc") {
+          $env:CYGWIN_ROOT = "C:\cygwin64"
+        }
+        Write-Host "Path: $($env:Path)"
+        $env:Path = "$($env:CYGWIN_ROOT)\bin;$($env:Path)"
+        Write-Host "Path: $($env:Path)"
+
+        bash --version
+        bash -c "autoreconf --version"
+        bash -c "make --version"
+
+        bash "autogen.sh"
+        bash "configure"
+        bash -c "make"
+        bash -c 'make check'
+        cat tests/test-suite.log
+      }
+
 
 ## Test Script ##
 test_script:
-  - bash -c 'make check'
+  - cmd: echo No test_script
