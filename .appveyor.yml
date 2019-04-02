@@ -2,23 +2,75 @@
 platform: x64
 image: Visual Studio 2017
 
+environment:
+  matrix:
+    - TARGET: vs2008
+      BUILD_ENVIRONMENT: msbuild
+      APPVEYOR_BUILD_WORKER_IMAGE: Visual Studio 2015
+      configuration: Release
+      platform: Win32
+
+    - TARGET: cygwin64-gcc
+      BUILD_ENVIRONMENT: cygwin
+      APPVEYOR_BUILD_WORKER_IMAGE: Visual Studio 2017
+      platform: x64
+
+    - TARGET: cygwin-gcc
+      BUILD_ENVIRONMENT: cygwin
+      APPVEYOR_BUILD_WORKER_IMAGE: Visual Studio 2017
+      platform: x86
+
 ## Install Script ##
 install:
-  - set CYGWIN_ROOT=C:\cygwin64
-  - set PATH=%CYGWIN_ROOT%\bin;%PATH%
-  - bash --version
-  - bash -c 'autoreconf --version'
-  - bash -c 'make --version'
+  - ps: |
+      # Install msinttypes into src dir
+      if ($env:BUILD_ENVIRONMENT -eq "msbuild") {
+        Invoke-WebRequest "https://github.com/chemeris/msinttypes/archive/f9e7c5758ed9e3b9f4b2394de1881c704dd79de0.zip" -OutFile "$($env:TEMP)\msinttypes.zip"
+        Expand-Archive -Path "$($env:TEMP)\msinttypes.zip"
+        Move-Item -Path .\msinttypes\*\*.h -Destination .\src
+        Remove-Item -Path .\msinttypes -Recurse
+      }
 
 ## Disable MSBuild (default) ##
 build: off
 
 ## Build Script ##
 build_script:
-  - bash autogen.sh
-  - bash configure
-  - bash -c 'make'
+  # msbuild
+  - ps: |
+      if ($env:BUILD_ENVIRONMENT -eq "msbuild") {
+        Write-Host "build_script for msbuild"
+
+        Set-Location "src/win32"
+        cscript.exe "configure.js" "compiler=msvc"
+        MSBuild /nologo /p:Configuration=$env:CONFIGURATION /logger:"C:\Program Files\AppVeyor\BuildAgent\Appveyor.MSBuildLogger.dll" modbus-9.sln
+      }
+
+  # cygwin
+  - ps: |
+      if ($env:BUILD_ENVIRONMENT -eq "cygwin") {
+        Write-Host "build_script for cygwin"
+
+        if ($env:TARGET -eq "cygwin-gcc") {
+          $env:CYGWIN_ROOT = "C:\cygwin"
+        }
+        if ($env:TARGET -eq "cygwin64-gcc") {
+          $env:CYGWIN_ROOT = "C:\cygwin64"
+        }
+        $env:Path = "$($env:CYGWIN_ROOT)\bin;$($env:Path)"
+
+        bash --version
+        bash -c "autoreconf --version"
+        bash -c "make --version"
+
+        bash "autogen.sh"
+        bash "configure"
+        bash -c "make"
+        bash -c 'make check'
+        cat tests/test-suite.log
+      }
+
 
 ## Test Script ##
 test_script:
-  - bash -c 'make check'
+  - cmd: echo No test_script
